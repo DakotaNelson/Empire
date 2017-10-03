@@ -16,6 +16,31 @@ serverExitCommand = 'restart'
 
 #####################################################
 #
+# Class for Multiuser server
+#
+#####################################################
+
+class MultiUserService(rpyc.Service):
+    '''Parent class for the rpyc service'''
+    class exposed_handler(empire):
+        '''Class responsible for handling each user connection'''
+        def __init__(self, sessionID, username, stdin, stdout):
+            self.thread = Thread(target = self.run)
+            self.username = username
+            self.stdin = stdin 
+            self.stdout = stdout
+            self.sessionID = sessionID
+            self.thread.start()
+
+        def run(self):
+            '''Thread logic to start the agentMenu loop'''
+            main = empire.MainMenu()
+            agentMenu = empire.AgentMenu(main, self.sessionID, True, self.stdin, self.stdout)
+
+
+
+#####################################################
+#
 # Database interaction methods for the RESTful API
 #
 #####################################################
@@ -140,7 +165,7 @@ def get_permanent_token(conn):
 #
 ####################################################################
 
-def start_restful_api(empireMenu, suppress=False, username=None, password=None, port=1337):
+def start_restful_api(empireMenu, suppress=False, username=None, password=None, port=1337, multiuser=False, multiport=None, certPath=None):
     """
     Kick off the RESTful API with the given parameters.
 
@@ -176,6 +201,9 @@ def start_restful_api(empireMenu, suppress=False, username=None, password=None, 
     print ''
 
     print " * Starting Empire RESTful API on port: %s" %(port)
+
+    if multiuser:
+        print " * Starting Empire Multiuser Server on port: %s" % (multiport)
 
     # refresh the token for the RESTful API
     apiToken = refresh_api_token(conn)
@@ -1242,9 +1270,12 @@ if __name__ == '__main__':
     launchGroup = restGroup.add_mutually_exclusive_group()
     launchGroup.add_argument('--rest', action='store_true', help='Run Empire and the RESTful API.')
     launchGroup.add_argument('--headless', action='store_true', help='Run Empire and the RESTful API headless without the usual interface.')
+    launchGroup.add_argument('--multiuser', action='store_true', help='Run Empire in multiuser mode. This will start the rest api and the multi user server. Output will not be supressed.')
     restGroup.add_argument('--restport', type=int, nargs=1, help='Port to run the Empire RESTful API on.')
     restGroup.add_argument('--username', nargs=1, help='Start the RESTful API with the specified username instead of pulling from empire.db')
     restGroup.add_argument('--password', nargs=1, help='Start the RESTful API with the specified password instead of pulling from empire.db')
+    restGroup.add_argument('--multisessionPort', type=int, help='Port of the multiuser rpyc server')
+    restGroup.add_argument('--certPath', help='Path containing the private key and certificate file')
 
     args = parser.parse_args()
 
@@ -1262,7 +1293,7 @@ if __name__ == '__main__':
         def thread_api(empireMenu):
             while serverExitCommand == 'restart':
                 try:
-                    start_restful_api(empireMenu=empireMenu, suppress=False, username=args.username, password=args.password, port=args.restport)
+                    start_restful_api(empireMenu=empireMenu, suppress=False, username=args.username, password=args.password, port=args.restport, multiport=None, certPath=None)
                 except SystemExit as e:
                     pass
 
@@ -1270,6 +1301,42 @@ if __name__ == '__main__':
         thread.daemon = True
         thread.start()
         sleep(2)
+        main.cmdloop()
+
+    elif args.multiuser:
+        # start an Empire instance, RESTful API, and multiuser rpyc server
+        if not args.multisessionPort:
+            args.multisessionPort = '7337'
+        
+        if not args.certPath:
+            print "[-] Please provide a path containing the private key and certificate file for SSL"
+            sys.exit(-1)
+
+        main = empire.MainMenu(args=args)
+
+        def thread_multiUser():
+            keypath = main.installPath + "/data/empire-priv.key"
+            certpath = main.installPath + "/data/empire-chain.pem"
+            authenticator = SSLAuthenticator(keypath, certpath)
+            ThreadedServer(MultiUserService, port = args.multisessionPort, authenticator = authenticator, protocol_config={"allow_all_attrs":True}).start()
+            
+        def thread_api(empireMenu):
+            while serverExitCommand == 'restart':
+                try:
+                    start_restful_api(empireMenu=empireMenu, suppress=False, username=args.username, password=args.password, port=args.restport, multiuser=args.multiuser, multiport=args.multisessionPort)
+                except SystemExit as e:
+                    pass
+        
+        thread = helpers.KThread(target=thread_api, args(main,))
+        thread.daemon = True
+        thread.start()
+        sleep(2)
+
+        multiThread = helpers.KThread(target=thread_multiUser, args(main,))
+        multiThread.daemon = True
+        multiThread.start()
+        sleep(2)
+
         main.cmdloop()
 
     elif args.headless:

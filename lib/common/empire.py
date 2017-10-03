@@ -1413,27 +1413,37 @@ class AgentMenu(cmd.Cmd):
     An abstracted class used by Empire to determine which agent menu type
     to instantiate.
     """
-    def __init__(self, mainMenu, sessionID):
+    def __init__(self, mainMenu, sessionID, remote, stdin, stdout):
 
         agentLanguage = mainMenu.agents.get_language_db(sessionID)
-
-        if agentLanguage.lower() == 'powershell':
-            agent_menu = PowerShellAgentMenu(mainMenu, sessionID)
-            agent_menu.cmdloop()
-        elif agentLanguage.lower() == 'python':
-            agent_menu = PythonAgentMenu(mainMenu, sessionID)
-            agent_menu.cmdloop()
+        
+        if not remote:
+            if agentLanguage.lower() == 'powershell':
+                agent_menu = PowerShellAgentMenu(mainMenu, sessionID)
+                agent_menu.cmdloop()
+            elif agentLanguage.lower() == 'python':
+                agent_menu = PythonAgentMenu(mainMenu, sessionID)
+                agent_menu.cmdloop()
+            else:
+                print helpers.color("[!] Agent language %s not recognized." % (agentLanguage))
         else:
-            print helpers.color("[!] Agent language %s not recognized." % (agentLanguage))
+            if agentLanguage.lower() == 'powershell':
+                agent_menu = PowerShellAgentMenu(mainMenu, sessionID, stdin, stdout)
+                agent_menu.use_rawinput = False
+                agent_menu.cmdloop()
+            elif agentLanguage.lower() == 'python':
+                agent_menu = PythonAgentMenu(mainMenu, sessionID, stdin, stdout)
+                agent_menu.use_rawinput = False
+                agent_menu.cmdloop()
 
 
 class PowerShellAgentMenu(cmd.Cmd):
     """
     The main class used by Empire to drive an individual 'agent' menu.
     """
-    def __init__(self, mainMenu, sessionID):
+    def __init__(self, mainMenu, sessionID, stdin, stdout):
 
-        cmd.Cmd.__init__(self)
+        cmd.Cmd.__init__(self, stdin=stdin, stdout=stdout)
 
         self.mainMenu = mainMenu
         self.sessionID = sessionID
@@ -2249,9 +2259,9 @@ class PowerShellAgentMenu(cmd.Cmd):
 
 class PythonAgentMenu(cmd.Cmd):
 
-    def __init__(self, mainMenu, sessionID):
+    def __init__(self, mainMenu, sessionID, stdin, stdout):
 
-        cmd.Cmd.__init__(self)
+        cmd.Cmd.__init__(self, stdin=stdin, stdout=stdout)
 
         self.mainMenu = mainMenu
 
